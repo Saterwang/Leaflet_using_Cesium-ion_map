@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leaflet + Cesium ion 地图示例</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map {
+            /* 确保地图占据整个页面或所需的区域 */
+            height: 100vh;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+    // **注意：请替换成您自己的 Cesium ion Access Token 和 Asset ID**
+    const CESIUM_ION_ACCESS_TOKEN = 'Your-Cesiumion-Token';
+    // 基础影像图的 Asset ID 通常为 2 或 382（高分辨率）。
+    // 这里以 Cesium World Terrain + Imagery 的 Asset ID: 2 为例。
+    const CESIUM_ION_ASSET_ID = 2; 
+
+    // Cesium ion REST API 的基础 URL
+    const CESIUM_ION_API_URL = 'https://api.cesium.com/v1/assets/';
+
+    // 初始化 Leaflet 地图
+    const map = L.map('map').setView([39.9, 116.4], 5); // 初始视角：北京附近，缩放级别 5
+
+    /**
+     * 1. 认证并获取 Cesium ion 资源的端点 URL (TMS)
+     */
+    async function getIonAssetEndpoint(assetId, token) {
+        const url = `${CESIUM_ION_API_URL}${assetId}/endpoint`;
+
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}` // 使用 Bearer Token 进行认证
+                }
+            });
+
+            if (!response.ok) {
+                // 如果请求失败（例如 401 Unauthorized），抛出错误
+                throw new Error(`HTTP 错误！状态码: ${response.status} - ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            
+            // 检查返回的数据类型是否为 Imagery/Tileset
+            if (data.type !== 'IMAGERY' && data.type !== 'TERRAIN') {
+                console.error('资产类型不是影像或地形，无法用 Leaflet TileLayer 加载:', data.type);
+                return null;
+            }
+
+            // 返回切片服务的 URL 模板，通常是 `url` 字段
+            return data.url; 
+
+        } catch (error) {
+            console.error('获取 Cesium ion 资源端点失败:', error);
+            // 在地图上显示错误信息
+            L.marker(map.getCenter())
+                .addTo(map)
+                .bindPopup(`**地图加载失败：**<br>${error.message}<br>请检查您的 Token 和 Asset ID。`)
+                .openPopup();
+            return null;
+        }
+    }
+
+    /**
+     * 2. 加载地图图层
+     */
+    async function loadIonLayer() {
+        const tileUrlTemplate = await getIonAssetEndpoint(CESIUM_ION_ASSET_ID, CESIUM_ION_ACCESS_TOKEN);
+
+        if (tileUrlTemplate) {
+            // Leaflet TileLayer 要求 URL 中包含 {z}, {x}, {y}
+            // Cesium ion 返回的 URL 通常已经是 TMS 或 WMS/WMTS 格式，可以尝试直接使用。
+            // 对于 Cesium ion 基础影像 (ID=2)，返回的 URL 格式为：
+            // https://assets.ion.cesium.com/a/ID/tms/1.0.0/imagery/{z}/{x}/{y}.jpg?access_token=TOKEN
+            // L.TileLayer 接受这种格式。
+            
+            // 需要注意的是：Cesium ion 返回的 URL 模板中已经包含了 access_token 作为查询参数。
+            // 因此，我们不需要在 L.TileLayer 的 `options` 中单独设置 `headers`。
+
+            L.tileLayer(tileUrlTemplate, {
+                // 建议加上归属信息
+                attribution: '&copy; <a href="https://cesium.com/ion/">Cesium ion</a> Imagery',
+                maxZoom: 19, 
+                tileSize: 256,
+                // Cesium ion TMS 可能从不同的原点开始，但对于基础影像，默认设置通常适用
+            }).addTo(map);
+
+        } else {
+            console.warn('无法获取 Tile URL，将使用默认的 OpenStreetMap。');
+            // 如果 Cesium ion 图层加载失败，可以添加一个备用的基础图层
+             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+        }
+    }
+
+    // 运行加载函数
+    loadIonLayer();
+
+</script>
+</body>
+</html>
